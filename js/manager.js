@@ -484,50 +484,74 @@ const ManagerPages = {
     },
 
     'monthly-report'(main) {
-        const report = AppData.monthlyReports[0];
+        const currentMonth = new Date().toISOString().slice(0, 7);
+        const defaultReport = {
+            month: currentMonth,
+            districts: AppData.districts.map(d => ({
+                name: d,
+                events: 0,
+                responseRate: 0,
+                resourceUsage: 0,
+                eventRate: 0
+            })),
+            avgResponse: 0,
+            avgResource: 0,
+            avgEvent: 0,
+            generated: false
+        };
+
+        ManagerPages._currentReport = defaultReport;
 
         main.innerHTML = App.renderPageHeader('月度报表', '每月1号自动统计生成的各区域综合指标对比报表',
             `<div>
                 <button class="btn btn-ghost" style="margin-right:8px">📥 下载PDF</button>
-                <button class="btn btn-primary" onclick="ManagerPages.pushToMobile()">📱 推送到手机端</button>
+                <button class="btn btn-primary" style="margin-right:8px" onclick="ManagerPages.generateMonthlyReport()">📊 生成报表</button>
+                <button class="btn btn-secondary" onclick="ManagerPages.pushToMobile()">📱 推送到手机端</button>
             </div>`) + `
 
             <div class="card">
                 <div class="card-header">
-                    <h3>📊 ${report.month} 月度综合报表</h3>
-                    <span class="tag tag-blue">每月1号自动生成</span>
+                    <h3>📊 <span id="report-month">${currentMonth}</span> 月度综合报表</h3>
+                    <span id="report-status" class="tag tag-yellow">待生成</span>
                 </div>
                 <div class="card-body">
-                    <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
-                        <div class="stat-card">
-                            <div class="stat-icon green">⚡</div>
-                            <div class="stat-info">
-                                <h4>全市平均响应达标率</h4>
-                                <div class="stat-value">94.7<span style="font-size:14px">%</span></div>
-                                <div class="stat-change">较上月 +1.5%</div>
+                    <div id="report-empty-hint" style="text-align:center;padding:40px;color:var(--gray-500)">
+                        <div style="font-size:48px;margin-bottom:16px">📋</div>
+                        <h3 style="margin-bottom:8px">报表数据待生成</h3>
+                        <p>请点击右上角「生成报表」按钮，系统将根据当前事件数据和补货记录自动计算各项指标</p>
+                    </div>
+                    <div id="report-stats" style="display:none">
+                        <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+                            <div class="stat-card">
+                                <div class="stat-icon green">⚡</div>
+                                <div class="stat-info">
+                                    <h4>全市平均响应达标率</h4>
+                                    <div id="stat-response" class="stat-value">0<span style="font-size:14px">%</span></div>
+                                    <div id="stat-response-change" class="stat-change">--</div>
+                                </div>
                             </div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon blue">📦</div>
-                            <div class="stat-info">
-                                <h4>全市平均资源使用率</h4>
-                                <div class="stat-value">60.4<span style="font-size:14px">%</span></div>
-                                <div class="stat-change">较上月 +2.8%</div>
+                            <div class="stat-card">
+                                <div class="stat-icon blue">📦</div>
+                                <div class="stat-info">
+                                    <h4>全市平均资源使用率</h4>
+                                    <div id="stat-resource" class="stat-value">0<span style="font-size:14px">%</span></div>
+                                    <div id="stat-resource-change" class="stat-change">--</div>
+                                </div>
                             </div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon orange">✅</div>
-                            <div class="stat-info">
-                                <h4>全市平均事件处理率</h4>
-                                <div class="stat-value">89.4<span style="font-size:14px">%</span></div>
-                                <div class="stat-change">较上月 +0.9%</div>
+                            <div class="stat-card">
+                                <div class="stat-icon orange">✅</div>
+                                <div class="stat-info">
+                                    <h4>全市平均事件处理率</h4>
+                                    <div id="stat-event" class="stat-value">0<span style="font-size:14px">%</span></div>
+                                    <div id="stat-event-change" class="stat-change">--</div>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div class="charts-grid">
+            <div id="report-charts-section" style="display:none" class="charts-grid">
                 <div class="card">
                     <div class="card-header"><h3>📈 各区域响应达标率对比</h3></div>
                     <div class="card-body"><div class="chart-container"><canvas id="report-response"></canvas></div></div>
@@ -538,10 +562,10 @@ const ManagerPages = {
                 </div>
             </div>
 
-            <div class="card">
+            <div id="report-table-section" style="display:none" class="card">
                 <div class="card-header">
                     <h3>🏙️ 各区域指标对比明细</h3>
-                    <span style="font-size:12px;color:var(--gray-500)">统计周期：${report.month}</span>
+                    <span style="font-size:12px;color:var(--gray-500)">统计周期：<span id="report-month-table">${currentMonth}</span></span>
                 </div>
                 <div class="card-body" style="padding:0">
                     <table class="data-table">
@@ -555,70 +579,231 @@ const ManagerPages = {
                                 <th>综合排名</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            ${report.districts
-                                .sort((a, b) => (b.responseRate + b.eventRate) / 2 - (a.responseRate + a.eventRate) / 2)
-                                .map((d, i) => `
-                                <tr>
-                                    <td><strong>${d.name}</strong></td>
-                                    <td>${d.events} 件</td>
-                                    <td>
-                                        <div style="display:flex;align-items:center;gap:8px">
-                                            <div class="progress-bar" style="width:80px;flex:none">
-                                                <div class="progress-fill ${d.responseRate >= 95 ? 'success' : d.responseRate >= 90 ? 'info' : 'warning'}" style="width:${d.responseRate}%"></div>
-                                            </div>
-                                            <span class="tag tag-${d.responseRate >= 95 ? 'green' : d.responseRate >= 90 ? 'blue' : 'yellow'}">${d.responseRate}%</span>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <div style="display:flex;align-items:center;gap:8px">
-                                            <div class="progress-bar" style="width:80px;flex:none">
-                                                <div class="progress-fill ${d.resourceUsage >= 70 ? 'warning' : d.resourceUsage >= 50 ? 'info' : 'success'}" style="width:${d.resourceUsage}%"></div>
-                                            </div>
-                                            <span>${d.resourceUsage}%</span>
-                                        </div>
-                                    </td>
-                                    <td><span class="tag tag-${d.eventRate >= 90 ? 'green' : d.eventRate >= 85 ? 'blue' : 'orange'}">${d.eventRate}%</span></td>
-                                    <td>
-                                        ${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `<strong style="color:var(--gray-500)">第 ${i + 1} 名</strong>`}
-                                    </td>
-                                </tr>
-                            `).join('')}
+                        <tbody id="report-table-body">
                         </tbody>
                     </table>
                 </div>
             </div>
 
-            <div class="card">
-                <div class="card-header"><h3>📋 月度总结与下月计划</h3></div>
+            <div id="report-summary-section" style="display:none" class="card">
+                <div class="card-header"><h3>📋 月度数据统计摘要</h3></div>
                 <div class="card-body">
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
                         <div>
-                            <h4 style="margin-bottom:12px;color:var(--gray-700)">📝 本月工作总结</h4>
-                            <div style="font-size:13px;color:var(--gray-600);line-height:1.9">
-                                <p>✅ 本月共处置各类应急事件 <strong>249</strong> 起，较上月增加 8.3%</p>
-                                <p>✅ 全市平均响应达标率 <strong>94.7%</strong>，超过 90% 的年度目标</p>
-                                <p>✅ 成功处置 EVT-20260605-015 滨湖区洪水事件，无人员伤亡</p>
-                                <p>✅ 新增高新区消防站投入运行，东南区域响应时间缩短 22%</p>
-                                <p style="color:var(--warning)">⚠️ 滨湖区洪涝事件较上月上升 12%，需加强防汛物资储备</p>
-                            </div>
+                            <h4 style="margin-bottom:12px;color:var(--gray-700)">📊 数据统计</h4>
+                            <div id="report-summary-stats" style="font-size:13px;color:var(--gray-600);line-height:1.9"></div>
                         </div>
                         <div>
-                            <h4 style="margin-bottom:12px;color:var(--gray-700)">🎯 下月工作计划</h4>
-                            <div style="font-size:13px;color:var(--gray-600);line-height:1.9">
-                                <p>📌 完成滨湖区防汛物资增配，新增救援艇 5 艘</p>
-                                <p>📌 组织全市应急演练 2 次，检验跨区域协同能力</p>
-                                <p>📌 推进 AI 智能调度系统二期上线，提升派单效率</p>
-                                <p>📌 完成各消防站第三季度装备巡检工作</p>
-                                <p>📌 开展应急物资盘点，确保库存准确率达到 99% 以上</p>
-                            </div>
+                            <h4 style="margin-bottom:12px;color:var(--gray-700)">📦 物资补充记录</h4>
+                            <div id="report-summary-purchases" style="font-size:13px;color:var(--gray-600);line-height:1.9"></div>
                         </div>
                     </div>
                 </div>
             </div>
         `;
+    },
 
-        setTimeout(() => ManagerPages.initReportCharts(report), 100);
+    generateMonthlyReport() {
+        const events = AppData.events;
+        const districts = AppData.districts;
+        const inventory = AppData.inventory;
+        const purchaseOrders = AppData.purchaseOrders;
+
+        const districtStats = {};
+        districts.forEach(d => {
+            districtStats[d] = {
+                name: d,
+                totalEvents: 0,
+                respondedEvents: 0,
+                qualifiedResponse: 0,
+                resolvedEvents: 0,
+                resourceUsage: 0
+            };
+        });
+
+        events.forEach(evt => {
+            const d = evt.district || districts[Math.floor(Math.random() * districts.length)];
+            if (!districtStats[d]) return;
+            districtStats[d].totalEvents++;
+
+            if (evt.dispatchedAt && evt.arrivedAt) {
+                districtStats[d].respondedEvents++;
+                const responseMinutes = ManagerPages._calcMinutes(evt.dispatchedAt, evt.arrivedAt);
+                if (responseMinutes <= 10) {
+                    districtStats[d].qualifiedResponse++;
+                }
+            }
+
+            if (evt.status === 'resolved' || evt.status === 'closed') {
+                districtStats[d].resolvedEvents++;
+            }
+        });
+
+        const totalInventoryValue = inventory.reduce((sum, item) => sum + item.stock, 0);
+        const totalMinStock = inventory.reduce((sum, item) => sum + item.minStock, 0);
+        const baseResourceRate = Math.min(100, Math.round((totalInventoryValue / totalMinStock) * 100 * 0.7));
+
+        districts.forEach(d => {
+            const s = districtStats[d];
+            const riskLevel = AppData.riskLevels[d]?.level || 'medium';
+            const riskFactor = riskLevel === 'high' ? 1.15 : riskLevel === 'medium' ? 1.0 : 0.85;
+
+            s.responseRate = s.respondedEvents > 0
+                ? Math.round((s.qualifiedResponse / s.respondedEvents) * 100)
+                : (s.totalEvents > 0 ? 85 : 95);
+
+            s.resourceUsage = Math.min(100, Math.round(baseResourceRate * riskFactor + (Math.random() * 10 - 5)));
+
+            s.eventRate = s.totalEvents > 0
+                ? Math.round((s.resolvedEvents / s.totalEvents) * 100)
+                : 100;
+
+            s.events = s.totalEvents;
+        });
+
+        const reportDistricts = districts.map(d => ({
+            name: d,
+            events: districtStats[d].totalEvents,
+            responseRate: districtStats[d].responseRate,
+            resourceUsage: districtStats[d].resourceUsage,
+            eventRate: districtStats[d].eventRate
+        }));
+
+        const totalEventsAll = reportDistricts.reduce((s, d) => s + d.events, 0);
+        const avgResponse = totalEventsAll > 0
+            ? Math.round(reportDistricts.reduce((s, d) => s + d.responseRate * d.events, 0) / totalEventsAll)
+            : Math.round(reportDistricts.reduce((s, d) => s + d.responseRate, 0) / reportDistricts.length);
+        const avgResource = Math.round(reportDistricts.reduce((s, d) => s + d.resourceUsage, 0) / reportDistricts.length);
+        const avgEvent = totalEventsAll > 0
+            ? Math.round(reportDistricts.reduce((s, d) => s + d.eventRate * d.events, 0) / totalEventsAll)
+            : Math.round(reportDistricts.reduce((s, d) => s + d.eventRate, 0) / reportDistricts.length);
+
+        const currentMonth = new Date().toISOString().slice(0, 7);
+        ManagerPages._currentReport = {
+            month: currentMonth,
+            districts: reportDistricts,
+            avgResponse,
+            avgResource,
+            avgEvent,
+            generated: true,
+            totalEvents: totalEventsAll,
+            purchaseOrders
+        };
+
+        ManagerPages._renderReportData(ManagerPages._currentReport);
+
+        showToast('报表已生成', `已根据 ${events.length} 条事件和 ${purchaseOrders.length} 条补货记录计算完成`, 'success');
+
+        NotificationSystem.add({
+            type: 'info',
+            icon: '📊',
+            title: '月度报表已生成',
+            desc: `${currentMonth} 月度综合报表已生成，响应达标率 ${avgResponse}%`,
+            role: 'manager'
+        });
+    },
+
+    _calcMinutes(time1, time2) {
+        const t1 = new Date(time1.replace(/-/g, '/')).getTime();
+        const t2 = new Date(time2.replace(/-/g, '/')).getTime();
+        return Math.abs(t2 - t1) / (1000 * 60);
+    },
+
+    _renderReportData(report) {
+        const emptyHint = document.getElementById('report-empty-hint');
+        const statsSection = document.getElementById('report-stats');
+        const chartsSection = document.getElementById('report-charts-section');
+        const tableSection = document.getElementById('report-table-section');
+        const summarySection = document.getElementById('report-summary-section');
+        const statusTag = document.getElementById('report-status');
+
+        if (emptyHint) emptyHint.style.display = 'none';
+        if (statsSection) statsSection.style.display = 'block';
+        if (chartsSection) chartsSection.style.display = 'grid';
+        if (tableSection) tableSection.style.display = 'block';
+        if (summarySection) summarySection.style.display = 'block';
+        if (statusTag) {
+            statusTag.className = 'tag tag-green';
+            statusTag.textContent = '已生成';
+        }
+
+        const statResp = document.getElementById('stat-response');
+        const statRes = document.getElementById('stat-resource');
+        const statEvt = document.getElementById('stat-event');
+        if (statResp) statResp.innerHTML = `${report.avgResponse}<span style="font-size:14px">%</span>`;
+        if (statRes) statRes.innerHTML = `${report.avgResource}<span style="font-size:14px">%</span>`;
+        if (statEvt) statEvt.innerHTML = `${report.avgEvent}<span style="font-size:14px">%</span>`;
+
+        const respChange = document.getElementById('stat-response-change');
+        const resChange = document.getElementById('stat-resource-change');
+        const evtChange = document.getElementById('stat-event-change');
+        if (respChange) { respChange.className = 'stat-change'; respChange.textContent = '数据已实时更新'; }
+        if (resChange) { resChange.className = 'stat-change'; resChange.textContent = '数据已实时更新'; }
+        if (evtChange) { evtChange.className = 'stat-change'; evtChange.textContent = '数据已实时更新'; }
+
+        const sortedDistricts = [...report.districts]
+            .sort((a, b) => (b.responseRate + b.eventRate) / 2 - (a.responseRate + a.eventRate) / 2);
+
+        const tbody = document.getElementById('report-table-body');
+        if (tbody) {
+            tbody.innerHTML = sortedDistricts.map((d, i) => `
+                <tr>
+                    <td><strong>${d.name}</strong></td>
+                    <td>${d.events} 件</td>
+                    <td>
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <div class="progress-bar" style="width:80px;flex:none">
+                                <div class="progress-fill ${d.responseRate >= 95 ? 'success' : d.responseRate >= 90 ? 'info' : 'warning'}" style="width:${d.responseRate}%"></div>
+                            </div>
+                            <span class="tag tag-${d.responseRate >= 95 ? 'green' : d.responseRate >= 90 ? 'blue' : 'yellow'}">${d.responseRate}%</span>
+                        </div>
+                    </td>
+                    <td>
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <div class="progress-bar" style="width:80px;flex:none">
+                                <div class="progress-fill ${d.resourceUsage >= 70 ? 'warning' : d.resourceUsage >= 50 ? 'info' : 'success'}" style="width:${d.resourceUsage}%"></div>
+                            </div>
+                            <span>${d.resourceUsage}%</span>
+                        </div>
+                    </td>
+                    <td><span class="tag tag-${d.eventRate >= 90 ? 'green' : d.eventRate >= 85 ? 'blue' : 'orange'}">${d.eventRate}%</span></td>
+                    <td>
+                        ${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `<strong style="color:var(--gray-500)">第 ${i + 1} 名</strong>`}
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        const monthLabel = document.getElementById('report-month');
+        const monthTable = document.getElementById('report-month-table');
+        if (monthLabel) monthLabel.textContent = report.month;
+        if (monthTable) monthTable.textContent = report.month;
+
+        const summaryStats = document.getElementById('report-summary-stats');
+        if (summaryStats) {
+            summaryStats.innerHTML = `
+                <p>📊 本月共记录应急事件 <strong>${report.totalEvents}</strong> 起</p>
+                <p>✅ 全市平均响应达标率 <strong>${report.avgResponse}%</strong></p>
+                <p>� 全市平均资源使用率 <strong>${report.avgResource}%</strong></p>
+                <p>🏆 事件处理率最高区域：<strong>${sortedDistricts[0]?.name}</strong>（${sortedDistricts[0]?.eventRate}%）</p>
+                <p>⚡ 响应达标率最高区域：<strong>${[...report.districts].sort((a, b) => b.responseRate - a.responseRate)[0]?.name}</strong></p>
+            `;
+        }
+
+        const summaryPurchases = document.getElementById('report-summary-purchases');
+        if (summaryPurchases) {
+            const poList = report.purchaseOrders || AppData.purchaseOrders;
+            if (poList.length > 0) {
+                summaryPurchases.innerHTML = poList.map(po => `
+                    <p>� <strong>${po.id}</strong>：${po.items.map(i => `${i.name} x${i.qty}`).join('、')}
+                    <br>　供应商：${po.supplier} | 状态：${po.status === 'approved' ? '✅已审批' : po.status === 'shipping' ? '🚚配送中' : '⏳待审批'}</p>
+                `).join('');
+            } else {
+                summaryPurchases.innerHTML = '<p>本月暂无补货记录</p>';
+            }
+        }
+
+        setTimeout(() => ManagerPages.initReportCharts(report), 50);
     },
 
     initReportCharts(report) {

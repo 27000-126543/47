@@ -242,6 +242,15 @@ body {
     color: #fff;
 }
 
+.btn-secondary {
+    background: var(--gray-600);
+    color: #fff;
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: var(--gray-700);
+}
+
 .btn-ghost {
     background: transparent;
     color: var(--gray-600);

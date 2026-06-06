@@ -210,6 +210,7 @@ const DispatcherPages = {
     reportProgress(id) {
         const event = AppData.events.find(e => e.id === id);
         if (!event) return;
+        DispatcherPages._currentEvent = event;
 
         showModal({
             title: `📸 进度上报 - ${event.id}`,
@@ -298,35 +299,61 @@ const DispatcherPages = {
 
                 <div>
                     <label class="form-label">📸 上传现场照片</label>
-                    <div class="photos-grid">
+                    <div class="photos-grid" id="report-photos-grid">
                         ${(event.photos || []).map(p => `<div class="photo-thumb"><img src="${p}" alt=""></div>`).join('')}
-                        <div class="photo-upload" onclick="DispatcherPages.addPhoto()">
+                        <label class="photo-upload" style="margin:0">
                             <span class="plus">+</span>
                             <span>添加照片</span>
-                        </div>
+                            <input type="file" accept="image/*" multiple style="display:none" onchange="DispatcherPages.handlePhotoUpload(event)">
+                        </label>
                     </div>
-                    <p style="font-size:12px;color:var(--gray-500);margin-top:8px">上传的照片将实时同步至指挥中心</p>
+                    <p style="font-size:12px;color:var(--gray-500);margin-top:8px">点击上传按钮从本地选择图片，支持多张同时上传</p>
                 </div>
             `
         });
     },
 
+    handlePhotoUpload(fileInputEvent) {
+        const files = fileInputEvent.target.files;
+        if (!files || files.length === 0) return;
+
+        const grid = document.getElementById('report-photos-grid');
+        const uploadLabel = grid.querySelector('.photo-upload');
+        let processed = 0;
+
+        Array.from(files).forEach(file => {
+            if (!file.type.startsWith('image/')) {
+                showToast('格式错误', `${file.name} 不是图片文件`, 'warning');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const newDiv = document.createElement('div');
+                newDiv.className = 'photo-thumb';
+                newDiv.innerHTML = `<img src="${e.target.result}" alt="${file.name}" title="${file.name} (${(file.size / 1024).toFixed(1)} KB)">`;
+                grid.insertBefore(newDiv, uploadLabel);
+                processed++;
+
+                if (DispatcherPages._currentEvent) {
+                    DispatcherPages._currentEvent.photos = DispatcherPages._currentEvent.photos || [];
+                    DispatcherPages._currentEvent.photos.push(e.target.result);
+                }
+
+                if (processed === files.length) {
+                    showToast('上传成功', `已添加 ${processed} 张现场照片`, 'success');
+                }
+            };
+            reader.readAsDataURL(file);
+        });
+
+        fileInputEvent.target.value = '';
+    },
+
     addPhoto() {
-        const photos = [
-            'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=300',
-            'https://images.unsplash.com/photo-1587502537745-84b86da1204f?w=300',
-            'https://images.unsplash.com/photo-1504280390367-361c6d9f38f4?w=300',
-            'https://images.unsplash.com/photo-1582139329536-e7284fece509?w=300'
-        ];
-        const randomPhoto = photos[Math.floor(Math.random() * photos.length)];
-        const existingGrid = document.querySelector('.photos-grid');
-        if (existingGrid) {
-            const uploadBtn = existingGrid.querySelector('.photo-upload');
-            const newDiv = document.createElement('div');
-            newDiv.className = 'photo-thumb';
-            newDiv.innerHTML = `<img src="${randomPhoto}" alt="">`;
-            existingGrid.insertBefore(newDiv, uploadBtn);
-            showToast('照片已添加', '可继续添加更多现场照片', 'success');
+        const fileInput = document.querySelector('#report-photos-grid input[type="file"]');
+        if (fileInput) {
+            fileInput.click();
         }
     }
 };
